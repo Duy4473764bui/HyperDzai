@@ -1,14 +1,14 @@
-name: cache-windows-installers
+name: windows-11-rdp-setup
 
 on:
   workflow_dispatch:
 
 env:
   INSTALLERS_DIR: installers
-  INSTALLER_CACHE_KEY: installers-windows-v3
+  INSTALLER_CACHE_KEY: installers-windows-v4
 
 jobs:
-  populate-cache:
+  setup-rdp:
     runs-on: windows-latest
     steps:
       - name: Restore installer cache
@@ -18,74 +18,89 @@ jobs:
           path: ${{ env.INSTALLERS_DIR }}
           key: ${{ env.INSTALLER_CACHE_KEY }}
 
-      - name: Download installers
+      - name: Verify installers
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-
-          if ('${{ steps.restore-cache.outputs.cache-hit }}' -eq 'true') {
-            Write-Host '::notice::Cache already populated. Skipping downloads.'
-            exit 0
+          if ('${{ steps.restore-cache.outputs.cache-hit }}' -ne 'true') {
+            throw '⚠️ Cache chưa có. Chạy workflow cache-windows-installers trước.'
           }
 
-          function Invoke-Download {
-            param(
-              [Parameter(Mandatory = $true)][string[]]$Urls,
-              [Parameter(Mandatory = $true)][string]$OutFile,
-              [int]$Retries = 3
-            )
-
-            foreach ($url in $Urls) {
-              for ($attempt = 1; $attempt -le $Retries; $attempt++) {
-                try {
-                  Invoke-WebRequest -Uri $url -OutFile $OutFile -ErrorAction Stop
-                  if ((Test-Path $OutFile) -and ((Get-Item $OutFile).Length -gt 0)) {
-                    return
-                  }
-                } catch {
-                  if ($attempt -eq $Retries) {
-                    Remove-Item -Path $OutFile -ErrorAction SilentlyContinue
-                  }
-                  Start-Sleep -Seconds ([math]::Pow(2, $attempt))
-                }
-              }
+          $installerPath = Join-Path $env:GITHUB_WORKSPACE $env:INSTALLERS_DIR
+          foreach ($file in 'DiscordSetup.exe','BraveBrowserSetup.exe','WindsurfSetup.exe','tailscale.msi') {
+            $full = Join-Path $installerPath $file
+            if (-not (Test-Path $full)) {
+              throw "❌ Thiếu file $file trong cache."
             }
-
-            throw "Failed to download file after trying all URLs: $($Urls -join ', ')"
           }
 
-          $target = Join-Path $env:GITHUB_WORKSPACE $env:INSTALLERS_DIR
-          New-Item -ItemType Directory -Path $target -Force | Out-Null
-
-          Invoke-Download -Urls @(
-            'https://dl.discordapp.net/distro/app/stable/win/x64/DiscordSetup.exe',
-            'https://dl.discordapp.net/apps/win/0.0.309/DiscordSetup.exe',
-            'https://discord.com/api/download?platform=win&format=exe'
-          ) -OutFile (Join-Path $target 'DiscordSetup.exe')
-
-          Invoke-WebRequest -Uri 'https://laptop-updates.brave.com/latest/winx64' -OutFile (Join-Path $target 'BraveBrowserSetup.exe')
-
-          $windsurfUrls = @()
-          if ($env:WINDSURF_INSTALLER_URL) {
-            $windsurfUrls += $env:WINDSURF_INSTALLER_URL
-          }
-          $windsurfUrls += @(
-            'https://windsurf-stable.codeiumdata.com/win32-x64-user/stable/6a266ac3a91f80e64147aaf1e7640a92571474cf/WindsurfUserSetup-x64-1.12.16.exe',
-            'https://download.windsurf.dev/WindsurfUserSetup-x64.exe',
-            'https://windsurf-releases.s3.us-west-2.amazonaws.com/WindsurfUserSetup-x64.exe',
-            'https://windsurf-releases.s3.amazonaws.com/WindsurfUserSetup-x64.exe'
-          )
-
-          Invoke-Download -Urls $windsurfUrls -OutFile (Join-Path $target 'WindsurfSetup.exe')
-
-          Invoke-WebRequest -Uri 'https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi' -OutFile (Join-Path $target 'tailscale.msi')
-
-      - name: Report cache status
+      - name: Configure local user
         shell: pwsh
         run: |
-          if ('${{ steps.restore-cache.outputs.cache-hit }}' -eq 'true') {
-            Write-Host '::notice::Installer cache already populated.'
+          $ErrorActionPreference = 'Stop'
+          $password = 'hyperdayroi'
+          net user 'hyper' 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            net user 'hyper' $password /add
           } else {
-            Write-Host '::notice::Installer cache created. Future runs can restore key:'
-            Write-Host '::notice::${{ env.INSTALLER_CACHE_KEY }}'
+            net user 'hyper' $password
           }
+          net user 'hyper' /PASSWORDCHG:NO
+          wmic useraccount where "Name='hyper'" set PasswordExpires=FALSE | Out-Null
+          Add-LocalGroupMember -Group "Administrators" -Member "hyper"
+
+      - name: Enable RDP access
+        shell: pwsh
+        run: |
+          Write-Host "🪟 Bật Remote Desktop"
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Restart-Service -Name TermService -Force
+
+      - name: Install Tailscale
+        shell: pwsh
+        env:
+          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installerPath = Join-Path $env:GITHUB_WORKSPACE $env:INSTALLERS_DIR
+          $tailscaleInstaller = Join-Path $installerPath 'tailscale.msi'
+          Start-Process -FilePath msiexec.exe -ArgumentList "/i `"$tailscaleInstaller`" /qn /norestart" -Wait
+
+          $tailscaleExe = "C:\Program Files\Tailscale\tailscale.exe"
+          & $tailscaleExe up --authkey $env:TAILSCALE_AUTH_KEY --hostname ("win-" + $env:GITHUB_RUN_ID) --accept-dns=false
+          $tailscaleIp = (& $tailscaleExe ip -4)[0]
+          "TAILSCALE_IP=$tailscaleIp" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Install Desktop Apps
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installerPath = Join-Path $env:GITHUB_WORKSPACE $env:INSTALLERS_DIR
+
+          Write-Host "📦 Cài Discord"
+          Start-Process -FilePath (Join-Path $installerPath 'DiscordSetup.exe') -ArgumentList '/S' -Wait
+
+          Write-Host "📦 Cài Brave Browser"
+          Start-Process -FilePath msiexec.exe -ArgumentList "/i `"$installerPath\BraveBrowserSetup.exe`" /qn /norestart" -Wait
+
+          Write-Host "📦 Cài Windsurf"
+          Start-Process -FilePath (Join-Path $installerPath 'WindsurfSetup.exe') -ArgumentList '/S' -Wait
+
+          Write-Host "📦 Cài Visual Studio Code"
+          Invoke-WebRequest -Uri "https://code.visualstudio.com/sha/download?build=stable&os=win32-x64-user" -OutFile "$env:TEMP\vscode.exe"
+          Start-Process -FilePath "$env:TEMP\vscode.exe" -ArgumentList '/silent','/mergetasks=!runcode' -Wait
+          Remove-Item "$env:TEMP\vscode.exe" -Force
+
+      - name: Xuất thông tin kết nối
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "============================"
+          Write-Host "  🖥️  WINDOWS RDP READY"
+          Write-Host "============================"
+          Write-Host "🪪 User: hyper"
+          Write-Host "🔑 Pass: hyperdayroi"
+          Write-Host "🌐 IP: $env:TAILSCALE_IP"
+          Write-Host "============================"
+          Write-Host ""
