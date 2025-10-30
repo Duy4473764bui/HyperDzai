@@ -27,7 +27,7 @@ jobs:
 
     - name: 🔑 Auth Ngrok token
       env:
-        NGROK_TOKEN: ${{ secrets.NGROK_TOKEN }}
+        NGROK_AUTH_TOKEN: ${{ secrets.NGROK_TOKEN }}
       run: |
         cd "$env:USERPROFILE\ngrok"
         .\ngrok.exe config add-authtoken $env:NGROK_TOKEN
