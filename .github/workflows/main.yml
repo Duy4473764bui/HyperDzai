@@ -40,5 +40,5 @@ jobs:
         Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels" | Out-File tunnel.json -Force
         Get-Content tunnel.json
 
-    - name: ✅ Done
+    - name: ✅ thành công 
       run: echo "Connect using the ngrok TCP address shown above (user: RDP / pass: Passw0rd!)"
