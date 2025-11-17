@@ -10,7 +10,7 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          net user runneradmin 12345
-      - name: Ngừng để giữ máy hoạt động
+          net user runneradmin "SibiDi@2025"
+      - name: Keep alive
         run: |
           ping -n 999999 127.0.0.1 > nul
