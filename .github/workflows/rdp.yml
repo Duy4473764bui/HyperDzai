@@ -1,0 +1,16 @@
+name: RDP Windows
+
+on: workflow_dispatch
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Enable RDP
+        run: |
+          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          net user runneradmin 12345
+      - name: Ngừng để giữ máy hoạt động
+        run: |
+          ping -n 999999 127.0.0.1 > nul
