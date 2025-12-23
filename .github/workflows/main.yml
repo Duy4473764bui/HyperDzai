@@ -65,29 +65,7 @@ jobs:
           Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
           Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
           Remove-Item $installerPath -Force
-      
-      - name: Install Visual Studio Code
-        run: |
-          $vscodeUrl = "https://update.code.visualstudio.com/latest/win32-x64-user/stable"
-          $installerPath = "$env:TEMP\VSCodeSetup.exe"
-
-          # Download VS Code
-          Invoke-WebRequest -Uri $vscodeUrl -OutFile $installerPath
-
-          # Silent install
-          Start-Process -FilePath $installerPath -ArgumentList "/silent","/mergetasks=!runcode" -Wait
-
-          # Remove installer
-          Remove-Item $installerPath -Force
-
-          # Verify installation
-          if (-not (Get-Command "code" -ErrorAction SilentlyContinue)) {
-              Write-Error "VS Code installation failed"
-              exit 1
-          } else {
-              Write-Host "VS Code installed successfully!"
-          }
-          
+    
       - name: Establish Tailscale Connection
         run: |
           # Bring up Tailscale with the provided auth key and set a unique hostname
